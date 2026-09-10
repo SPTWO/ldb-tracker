@@ -481,7 +481,7 @@
     </label>
     <div class="filter-spacer"></div>
     <button class="btn btn-ghost btn-sm" id="btnClearFilter">ລ້າງຕົວກອງ</button>
-    <button class="btn btn-ghost btn-sm" id="btnTrash">🗑️ ຖັງຫຼິບ <span class="count" id="trashCount">0</span></button>
+    <button class="btn btn-ghost btn-sm" id="btnTrash">🗑️ Recycle Bin <span class="count" id="trashCount">0</span></button>
   </div>
 
   <div class="table-card">
@@ -541,7 +541,7 @@
 <div class="overlay" id="trashOverlay">
   <div class="modal" style="max-width:640px;">
     <div class="modal-head">
-      <h3 id="trashTitle">🗑️ ຖັງຫຼິບ</h3>
+      <h3 id="trashTitle">🗑️ Recycle Bin</h3>
       <button class="modal-close" id="trashCloseBtn">&times;</button>
     </div>
     <div class="modal-body">
@@ -684,7 +684,7 @@ const TAB_DEFS = {
       {key:"status", label:"ສະຖານະ", type:"status"},
       {key:"progress", label:"% ຄວາມຄືບໜ້າ", type:"number"}
     ],
-    tableCols:["title","department","owner","content","workCategory","status","progress","latestUpdateText","latestUpdateDate"]
+    tableCols:["title","department","owner","content","workCategory","status","progress","latestUpdateText","latestUpdateDate","dueDate"]
   },
   directives: {
     label: "ວຽກທິດຊີ້ນຳ ຜອ",
@@ -699,7 +699,7 @@ const TAB_DEFS = {
       {key:"status", label:"ສະຖານະ", type:"status"},
       {key:"progress", label:"% ຄວາມຄືບໜ້າ", type:"number"}
     ],
-    tableCols:["title","department","owner","content","workCategory","status","progress","latestUpdateText","latestUpdateDate"]
+    tableCols:["title","department","owner","content","workCategory","status","progress","latestUpdateText","latestUpdateDate","dueDate"]
   },
   planned: {
     label: "ວຽກແຜນປີ",
@@ -714,7 +714,7 @@ const TAB_DEFS = {
       {key:"progress", label:"% ຄວາມຄືບໜ້າ", type:"number"},
       {key:"note", label:"ໝາຍເຫດ", type:"textarea"}
     ],
-    tableCols:["title","workCategory","department","owner","quarter","status","progress","latestUpdateText","latestUpdateDate"]
+    tableCols:["title","workCategory","department","owner","quarter","status","progress","latestUpdateText","latestUpdateDate","dueDate"]
   }
 };
 
@@ -985,9 +985,9 @@ function renderDashboard(){
       <div class="foot">ຕ້ອງຮີບຕິດຕາມດ່ວນ</div>
     </div>
   `;
-  document.getElementById('cnt-clients').textContent = DB.clients.length;
-  document.getElementById('cnt-directives').textContent = DB.directives.length;
-  document.getElementById('cnt-planned').textContent = DB.planned.length;
+  document.getElementById('cnt-clients').textContent = DB.clients.filter(x=>!x.deleted).length;
+  document.getElementById('cnt-directives').textContent = DB.directives.filter(x=>!x.deleted).length;
+  document.getElementById('cnt-planned').textContent = DB.planned.filter(x=>!x.deleted).length;
 
   const lu = document.getElementById('lastUpdateTxt');
   if(DB.lastUpdate){
@@ -1010,24 +1010,36 @@ let selectedStatuses = new Set();
 let selectedDepts = new Set();
 let sortKey = null;
 let selectedSearchIds = new Set();
+let pinnedOnlyFilter = false;
 function renderSearchDropdown(){
   const menu = document.getElementById('searchMultiMenu');
   if(!menu) return;
   const q = document.getElementById('searchBox').value.trim().toLowerCase();
   const list = (DB[activeTab] || []).filter(x=>!x.deleted);
-  const matches = (q ? list.filter(x=>(x.title||'').toLowerCase().includes(q)) : list).slice(0, 60);
+  const matches = (q ? list.filter(x=>(x.title||'').toLowerCase().includes(q)) : list)
+    .filter(x=> !pinnedOnlyFilter || x.pinned)
+    .slice(0, 60);
+  const pinnedToggle = `<label style="border-bottom:1px solid var(--line);margin-bottom:4px;padding-bottom:8px;">
+      <input type="checkbox" ${pinnedOnlyFilter?'checked':''} onchange="togglePinnedOnlyFilter(this.checked)">
+      <span>📌 ສະແດງສະເພາະທີ່ປັກໝຸດ</span>
+    </label>`;
   const clearBtn = selectedSearchIds.size>0
     ? `<button type="button" class="multiselect-clear-btn" onclick="clearSearchSelection()">✕ ລ້າງທີ່ຕິກໄວ້ (${selectedSearchIds.size})</button>`
     : '';
   if(matches.length===0){
-    menu.innerHTML = clearBtn + `<div style="padding:10px;font-size:12.5px;color:var(--text-low);">ບໍ່ພົບ</div>`;
+    menu.innerHTML = pinnedToggle + clearBtn + `<div style="padding:10px;font-size:12.5px;color:var(--text-low);">ບໍ່ພົບ</div>`;
     return;
   }
-  menu.innerHTML = clearBtn + matches.map(item=>`
+  menu.innerHTML = pinnedToggle + clearBtn + matches.map(item=>`
     <label>
       <input type="checkbox" value="${item.id}" ${selectedSearchIds.has(item.id)?'checked':''} onchange="toggleSearchSelection('${item.id}',this.checked)">
       <span>${escapeHtml(item.title||'(ບໍ່ມີຊື່)')}</span>
     </label>`).join('');
+}
+function togglePinnedOnlyFilter(checked){
+  pinnedOnlyFilter = checked;
+  renderSearchDropdown();
+  renderTableBody();
 }
 function clearSearchSelection(){
   selectedSearchIds.clear();
@@ -1150,6 +1162,7 @@ function getFiltered(){
   const dateTo = document.getElementById('filterDateTo').value;
   const filtered = list.filter(item=>{
     if(item.deleted) return false;
+    if(pinnedOnlyFilter && !item.pinned) return false;
     if(selectedStatuses.size>0 && !selectedStatuses.has(item.status)) return false;
     if(selectedDepts.size>0 && !selectedDepts.has(item.department)) return false;
     if(dateFrom || dateTo){
@@ -1214,6 +1227,9 @@ function renderTableBody(){
         if(!l) return `<td>-</td>`;
         const d = (l.date && l.date!=='0000-00-00') ? formatDateLao(l.date) : '(ບໍ່ມີວັນທີ່)';
         return `<td>${d}</td>`;
+      }
+      if(key==="dueDate"){
+        return `<td>${item.dueDate ? formatDateLao(item.dueDate) : '-'}</td>`;
       }
       if(key==="status"){
         const cls = STATUS_BADGE[item.status] || 'badge-cancel';
@@ -1453,7 +1469,7 @@ function updateTrashCount(){
   if(el) el.textContent = getTrashItems(activeTab).length;
 }
 function openTrash(){
-  document.getElementById('trashTitle').textContent = '🗑️ ຖັງຫຼິບ — ' + TAB_DEFS[activeTab].label;
+  document.getElementById('trashTitle').textContent = '🗑️ Recycle Bin — ' + TAB_DEFS[activeTab].label;
   renderTrashList();
   document.getElementById('trashOverlay').classList.add('show');
 }
@@ -1464,7 +1480,7 @@ function renderTrashList(){
   const el = document.getElementById('trashList');
   const items = getTrashItems(activeTab);
   if(items.length===0){
-    el.innerHTML = `<div class="trash-empty">🗑️ ຖັງຫຼິບວ່າງເປົ່າ</div>`;
+    el.innerHTML = `<div class="trash-empty">🗑️ Recycle Binວ່າງເປົ່າ</div>`;
     return;
   }
   const sorted = [...items].sort((a,b)=> (b.deletedAt||'').localeCompare(a.deletedAt||''));
@@ -1502,18 +1518,18 @@ async function permanentDeleteItem(tab, id){
 }
 
 async function quickDelete(tab, id){
-  if(!confirm('ຢືນຢັນລຶບວຽກນີ້ອອກບໍ່? (ຈະຍ້າຍໄປຖັງຫຼິບ ກູ້ຄືນໄດ້ພາຍຫຼັງ)')) return;
+  if(!confirm('ຢືນຢັນລຶບວຽກນີ້ອອກບໍ່? (ຈະຍ້າຍໄປRecycle Bin ກູ້ຄືນໄດ້ພາຍຫຼັງ)')) return;
   const item = DB[tab].find(x=>x.id===id);
   if(!item) return;
   item.deleted = true;
   item.deletedAt = new Date().toISOString();
   stampEditor(item);
   await saveItem(tab, item);
-  showToast('🗑 ຍ້າຍໄປຖັງຫຼິບແລ້ວ');
+  showToast('🗑 ຍ້າຍໄປRecycle Binແລ້ວ');
 }
 async function deleteFromModal(){
   if(!editingId) { closeModal(); return; }
-  if(!confirm('ຢືນຢັນລຶບວຽກນີ້ອອກບໍ່? (ຈະຍ້າຍໄປຖັງຫຼິບ ກູ້ຄືນໄດ້ພາຍຫຼັງ)')) return;
+  if(!confirm('ຢືນຢັນລຶບວຽກນີ້ອອກບໍ່? (ຈະຍ້າຍໄປRecycle Bin ກູ້ຄືນໄດ້ພາຍຫຼັງ)')) return;
   const item = DB[editingTab].find(x=>x.id===editingId);
   if(!item) return;
   item.deleted = true;
@@ -1521,7 +1537,7 @@ async function deleteFromModal(){
   stampEditor(item);
   await saveItem(editingTab, item);
   closeModal();
-  showToast('🗑 ຍ້າຍໄປຖັງຫຼິບແລ້ວ');
+  showToast('🗑 ຍ້າຍໄປRecycle Binແລ້ວ');
 }
 
 /* ============================================================
@@ -1707,6 +1723,7 @@ function computeReportCellValue(item, key, forExcel){
     if(!l) return '-';
     return esc((l.date && l.date!=='0000-00-00') ? formatDateLao(l.date) : '(ບໍ່ມີວັນທີ່)');
   }
+  if(key==='dueDate') return esc(item.dueDate ? formatDateLao(item.dueDate) : '-');
   if(key==='status') return esc(item.status || '-');
   if(key==='progress') return Math.max(0, Math.min(100, parseInt(item.progress)||0)) + '%';
   if(key==='title') return (item.pinned ? '📌 ' : '') + esc(item.title || '(ບໍ່ມີຊື່)');
@@ -2174,6 +2191,7 @@ document.getElementById('filterDateTo').addEventListener('change', renderTableBo
 document.getElementById('btnClearFilter').addEventListener('click', ()=>{
   document.getElementById('searchBox').value='';
   selectedSearchIds.clear();
+  pinnedOnlyFilter = false;
   renderSearchDropdown();
   selectedStatuses.clear();
   selectedDepts.clear();
@@ -2270,6 +2288,7 @@ window.toggleSort = toggleSort;
 window.toggleMultiselectValue = toggleMultiselectValue;
 window.toggleSearchSelection = toggleSearchSelection;
 window.clearSearchSelection = clearSearchSelection;
+window.togglePinnedOnlyFilter = togglePinnedOnlyFilter;
 
 /* ============================================================
    LOGIN
