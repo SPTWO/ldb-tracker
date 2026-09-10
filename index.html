@@ -747,24 +747,35 @@ async function loadData(){
     renderAll();
     return;
   }
-  try{
-    const url = APPS_SCRIPT_URL + '?action=getAll&username=' + encodeURIComponent(loginUsername) + '&password=' + encodeURIComponent(loginPassword);
-    const res = await fetch(url);
-    const data = await res.json();
-    if(data && data.error === 'unauthorized'){
-      showLoginScreen('ເຊດຊັນໝົດອາຍຸ ຫຼື ຂໍ້ມູນເຂົ້າສູ່ລະບົບບໍ່ຖືກຕ້ອງ ກະລຸນາເຂົ້າສູ່ລະບົບໃໝ່');
+  const url = APPS_SCRIPT_URL + '?action=getAll&username=' + encodeURIComponent(loginUsername) + '&password=' + encodeURIComponent(loginPassword);
+  let lastErr = null;
+  for(let attempt=0; attempt<2; attempt++){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), 20000); // never hang forever — fail with a clear error after 20s
+    try{
+      const res = await fetch(url, {credentials: 'omit', cache: 'no-store', signal: controller.signal});
+      const data = await res.json();
+      if(data && data.error === 'unauthorized'){
+        showLoginScreen('ເຊດຊັນໝົດອາຍຸ ຫຼື ຂໍ້ມູນເຂົ້າສູ່ລະບົບບໍ່ຖືກຕ້ອງ ກະລຸນາເຂົ້າສູ່ລະບົບໃໝ່');
+        return;
+      }
+      DB.clients = data.clients || [];
+      DB.directives = data.directives || [];
+      DB.planned = data.planned || [];
+      DB.lastUpdate = data.lastUpdate || null;
+      ['clients','directives','planned'].forEach(t=>{ if(DB[t].length>0) everHadData[t] = true; });
+      hideSaveError();
+      renderAll();
       return;
+    }catch(e){
+      lastErr = (e && e.name === 'AbortError') ? new Error('ລໍນານເກີນໄປ (ເຊື່ອມຕໍ່ອິນເຕີເນັດຊ້າ ຫຼື Server ບໍ່ຕອບ)') : e;
+      console.error('load failed (attempt '+(attempt+1)+')', e);
+      if(attempt===0) await sleep(700); // brief pause — this specific error tends to be transient, retry once before giving up
+    }finally{
+      clearTimeout(timeoutId);
     }
-    DB.clients = data.clients || [];
-    DB.directives = data.directives || [];
-    DB.planned = data.planned || [];
-    DB.lastUpdate = data.lastUpdate || null;
-    ['clients','directives','planned'].forEach(t=>{ if(DB[t].length>0) everHadData[t] = true; });
-    hideSaveError();
-  }catch(e){
-    console.error('load failed', e);
-    showSaveError('ໂຫລດຂໍ້ມູນຈາກ Google Sheets ບໍ່ສຳເລັດ: ' + (e.message || e));
   }
+  showSaveError('ໂຫລດຂໍ້ມູນຈາກ Google Sheets ບໍ່ສຳເລັດ: ' + (lastErr && lastErr.message ? lastErr.message : lastErr));
   renderAll();
 }
 
@@ -772,9 +783,14 @@ async function postToSheet_(payloadObj, attempts=2){
   let lastErr = null;
   const body = Object.assign({username: loginUsername, password: loginPassword}, payloadObj);
   for(let i=0;i<attempts;i++){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), 20000); // never hang forever — fail with a clear error after 20s
     try{
       const res = await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
+        credentials: 'omit',
+        cache: 'no-store',
+        signal: controller.signal,
         // text/plain avoids a CORS preflight request, which Apps Script
         // web apps don't handle — this keeps the write a "simple request"
         headers: {'Content-Type': 'text/plain;charset=utf-8'},
@@ -788,7 +804,9 @@ async function postToSheet_(payloadObj, attempts=2){
       if(data && data.ok) return {ok:true};
       lastErr = (data && data.error) ? data.error : 'ບໍ່ຮູ້ສາເຫດ (ບໍ່ໄດ້ຄ່າ ok:true ກັບຄືນ)';
     }catch(e){
-      lastErr = (e && e.message) ? e.message : String(e);
+      lastErr = (e && e.name === 'AbortError') ? 'ລໍນານເກີນໄປ (ເຊື່ອມຕໍ່ອິນເຕີເນັດຊ້າ ຫຼື Server ບໍ່ຕອບ) — ລອງໃໝ່ອີກຄັ້ງ' : ((e && e.message) ? e.message : String(e));
+    }finally{
+      clearTimeout(timeoutId);
     }
     if(i < attempts-1) await sleep(700);
   }
@@ -804,39 +822,40 @@ let lastRetryFn = null;
    so a stale/incomplete in-memory array can never wipe out rows
    it never intended to touch. This replaces the old "overwrite
    the whole tab on every save" model that caused every data-loss
-   incident so far.
+   incident so far. lastUpdate now rides along in the SAME request
+   as the write itself — one round-trip instead of two.
    ============================================================ */
 async function saveItem(tab, item){
   if(!isConfigured()){ showNotConfiguredWarning(); renderAll(); return; }
   lastRetryFn = () => saveItem(tab, item);
-  const r = await postToSheet_({action:'upsertItem', tab, item});
-  await afterWrite_(tab, r);
+  DB.lastUpdate = new Date().toISOString();
+  const r = await postToSheet_({action:'upsertItem', tab, item, lastUpdate: DB.lastUpdate});
+  afterWrite_(tab, r);
 }
 async function deleteItemRemote(tab, id){
   if(!isConfigured()){ showNotConfiguredWarning(); renderAll(); return; }
   lastRetryFn = () => deleteItemRemote(tab, id);
-  const r = await postToSheet_({action:'deleteItem', tab, id});
-  await afterWrite_(tab, r);
+  DB.lastUpdate = new Date().toISOString();
+  const r = await postToSheet_({action:'deleteItem', tab, id, lastUpdate: DB.lastUpdate});
+  afterWrite_(tab, r);
 }
 async function bulkAppendRemote(tab, items){
   if(!isConfigured()){ showNotConfiguredWarning(); renderAll(); return; }
   if(!items || items.length===0) return;
   lastRetryFn = () => bulkAppendRemote(tab, items);
-  const r = await postToSheet_({action:'bulkAppend', tab, items});
-  await afterWrite_(tab, r);
-}
-async function afterWrite_(tab, result){
   DB.lastUpdate = new Date().toISOString();
-  const metaR = await postToSheet_({action:'saveMeta', lastUpdate: DB.lastUpdate});
-  if(result.ok && metaR.ok){
+  const r = await postToSheet_({action:'bulkAppend', tab, items, lastUpdate: DB.lastUpdate});
+  afterWrite_(tab, r);
+}
+function afterWrite_(tab, result){
+  if(result.ok){
     hideSaveError();
     lastFailedTab = undefined;
     lastRetryFn = null;
     if(DB[tab] && DB[tab].length>0) everHadData[tab] = true;
   } else {
     lastFailedTab = tab;
-    const msg = !result.ok ? `[${TAB_DEFS[tab].label}] ${result.error}` : `[meta] ${metaR.error}`;
-    showSaveError(msg);
+    showSaveError(`[${TAB_DEFS[tab].label}] ${result.error}`);
   }
   renderAll();
 }
@@ -864,7 +883,7 @@ async function saveData(tab){
   let allOk = true;
   let failMsgs = [];
   for(const t of tabsToSave){
-    const r = await postToSheet_({action:'saveTab', tab: t, items: DB[t]});
+    const r = await postToSheet_({action:'saveTab', tab: t, items: DB[t], lastUpdate: DB.lastUpdate});
     if(!r.ok){
       allOk = false;
       failMsgs.push(`[${TAB_DEFS[t].label}] ${r.error}`);
@@ -873,8 +892,6 @@ async function saveData(tab){
       everHadData[t] = true;
     }
   }
-  const metaR = await postToSheet_({action:'saveMeta', lastUpdate: DB.lastUpdate});
-  if(!metaR.ok){ allOk = false; failMsgs.push('[meta] ' + metaR.error); }
 
   if(allOk){
     hideSaveError();
@@ -2287,9 +2304,11 @@ async function attemptLogin(){
   const btn = document.getElementById('btnLogin');
   btn.disabled = true;
   btn.textContent = 'ກຳລັງກວດສອບ...';
+  const controller = new AbortController();
+  const timeoutId = setTimeout(()=>controller.abort(), 20000); // never hang forever — fail with a clear error after 20s
   try{
     const url = APPS_SCRIPT_URL + '?action=login&username=' + encodeURIComponent(u) + '&password=' + encodeURIComponent(p);
-    const res = await fetch(url);
+    const res = await fetch(url, {credentials: 'omit', cache: 'no-store', signal: controller.signal});
     const data = await res.json();
     if(data && data.ok){
       loginUsername = u;
@@ -2304,9 +2323,11 @@ async function attemptLogin(){
     }
   }catch(e){
     console.error(e);
-    document.getElementById('loginError').textContent = 'ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ: ' + (e.message || e);
+    const msg = (e && e.name === 'AbortError') ? 'ລໍນານເກີນໄປ (ເຊື່ອມຕໍ່ອິນເຕີເນັດຊ້າ ຫຼື Server ບໍ່ຕອບ)' : (e.message || e);
+    document.getElementById('loginError').textContent = 'ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ: ' + msg;
     document.getElementById('loginError').style.display = 'block';
   }finally{
+    clearTimeout(timeoutId);
     btn.disabled = false;
     btn.textContent = 'ເຂົ້າສູ່ລະບົບ';
   }
@@ -2321,6 +2342,24 @@ function logout(){
 document.getElementById('loginForm').addEventListener('submit', e=>{
   e.preventDefault(); // stay on the same page — the browser still recognizes this as a real login submit and may offer to save it
   attemptLogin();
+});
+
+// If the tab was left in the background a long time, the connection/session
+// can go stale silently — refresh automatically instead of leaving the
+// person looking at old data with no clue a manual refresh is needed.
+let hiddenSinceTs = null;
+const STALE_AFTER_MS = 5 * 60 * 1000; // 5 minutes
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){
+    hiddenSinceTs = Date.now();
+  } else if(hiddenSinceTs && loginUsername){
+    const idleFor = Date.now() - hiddenSinceTs;
+    hiddenSinceTs = null;
+    if(idleFor > STALE_AFTER_MS){
+      showToast('🔄 ກຳລັງໂຫລດຂໍ້ມູນຫຼ້າສຸດ...');
+      loadData();
+    }
+  }
 });
 
 if(isConfigured()){
