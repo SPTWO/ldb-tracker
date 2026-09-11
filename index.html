@@ -741,42 +741,59 @@ function isConfigured(){ return APPS_SCRIPT_URL && APPS_SCRIPT_URL.trim() !== ''
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 let lastFailedTab = undefined; // undefined = never tried, null = "all tabs"
 
+let tabLoaded = { clients:false, directives:false, planned:false };
+async function fetchJsonWithRetry_(url, attempts=2){
+  let lastErr = null;
+  for(let attempt=0; attempt<attempts; attempt++){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), 45000); // never hang forever — fail with a clear error after 45s (Apps Script cold-starts can genuinely take a while)
+    try{
+      const res = await fetch(url, {credentials: 'omit', cache: 'no-store', signal: controller.signal});
+      const data = await res.json();
+      return {ok:true, data};
+    }catch(e){
+      lastErr = (e && e.name === 'AbortError') ? new Error('ລໍນານເກີນໄປ (ເຊື່ອມຕໍ່ອິນເຕີເນັດຊ້າ ຫຼື Server ບໍ່ຕອບ)') : e;
+      console.error('fetch failed (attempt '+(attempt+1)+')', e);
+      if(attempt < attempts-1) await sleep(700); // brief pause — this specific error tends to be transient, retry once before giving up
+    }finally{
+      clearTimeout(timeoutId);
+    }
+  }
+  return {ok:false, error:lastErr};
+}
+async function loadTab_(tab){
+  const url = APPS_SCRIPT_URL + '?action=getAll&tab=' + tab + '&username=' + encodeURIComponent(loginUsername) + '&password=' + encodeURIComponent(loginPassword);
+  const r = await fetchJsonWithRetry_(url);
+  if(!r.ok){
+    showSaveError(`ໂຫລດ [${TAB_DEFS[tab].label}] ບໍ່ສຳເລັດ: ` + (r.error && r.error.message ? r.error.message : r.error));
+    return false;
+  }
+  const data = r.data;
+  if(data && data.error === 'unauthorized'){
+    showLoginScreen('ເຊດຊັນໝົດອາຍຸ ຫຼື ຂໍ້ມູນເຂົ້າສູ່ລະບົບບໍ່ຖືກຕ້ອງ ກະລຸນາເຂົ້າສູ່ລະບົບໃໝ່');
+    return false;
+  }
+  DB[tab] = data[tab] || [];
+  if(data.lastUpdate) DB.lastUpdate = data.lastUpdate;
+  if(DB[tab].length>0) everHadData[tab] = true;
+  tabLoaded[tab] = true;
+  hideSaveError();
+  return true;
+}
 async function loadData(){
   if(!isConfigured()){
     showNotConfiguredWarning();
     renderAll();
     return;
   }
-  const url = APPS_SCRIPT_URL + '?action=getAll&username=' + encodeURIComponent(loginUsername) + '&password=' + encodeURIComponent(loginPassword);
-  let lastErr = null;
-  for(let attempt=0; attempt<2; attempt++){
-    const controller = new AbortController();
-    const timeoutId = setTimeout(()=>controller.abort(), 20000); // never hang forever — fail with a clear error after 20s
-    try{
-      const res = await fetch(url, {credentials: 'omit', cache: 'no-store', signal: controller.signal});
-      const data = await res.json();
-      if(data && data.error === 'unauthorized'){
-        showLoginScreen('ເຊດຊັນໝົດອາຍຸ ຫຼື ຂໍ້ມູນເຂົ້າສູ່ລະບົບບໍ່ຖືກຕ້ອງ ກະລຸນາເຂົ້າສູ່ລະບົບໃໝ່');
-        return;
-      }
-      DB.clients = data.clients || [];
-      DB.directives = data.directives || [];
-      DB.planned = data.planned || [];
-      DB.lastUpdate = data.lastUpdate || null;
-      ['clients','directives','planned'].forEach(t=>{ if(DB[t].length>0) everHadData[t] = true; });
-      hideSaveError();
-      renderAll();
-      return;
-    }catch(e){
-      lastErr = (e && e.name === 'AbortError') ? new Error('ລໍນານເກີນໄປ (ເຊື່ອມຕໍ່ອິນເຕີເນັດຊ້າ ຫຼື Server ບໍ່ຕອບ)') : e;
-      console.error('load failed (attempt '+(attempt+1)+')', e);
-      if(attempt===0) await sleep(700); // brief pause — this specific error tends to be transient, retry once before giving up
-    }finally{
-      clearTimeout(timeoutId);
-    }
-  }
-  showSaveError('ໂຫລດຂໍ້ມູນຈາກ Google Sheets ບໍ່ສຳເລັດ: ' + (lastErr && lastErr.message ? lastErr.message : lastErr));
+  // Load the tab currently on screen first — so the page feels usable right
+  // away — then fill in the other two tabs in the background.
+  const primary = activeTab;
+  const ok = await loadTab_(primary);
   renderAll();
+  if(!ok) return; // don't bother background-loading the rest if even this failed
+  const others = ['clients','directives','planned'].filter(t=>t!==primary);
+  others.forEach(t=>{ loadTab_(t).then(()=>renderAll()); });
 }
 
 async function postToSheet_(payloadObj, attempts=2){
@@ -784,7 +801,7 @@ async function postToSheet_(payloadObj, attempts=2){
   const body = Object.assign({username: loginUsername, password: loginPassword}, payloadObj);
   for(let i=0;i<attempts;i++){
     const controller = new AbortController();
-    const timeoutId = setTimeout(()=>controller.abort(), 20000); // never hang forever — fail with a clear error after 20s
+    const timeoutId = setTimeout(()=>controller.abort(), 45000); // never hang forever — fail with a clear error after 45s (Apps Script cold-starts can genuinely take a while)
     try{
       const res = await fetch(APPS_SCRIPT_URL, {
         method: 'POST',
@@ -985,9 +1002,9 @@ function renderDashboard(){
       <div class="foot">ຕ້ອງຮີບຕິດຕາມດ່ວນ</div>
     </div>
   `;
-  document.getElementById('cnt-clients').textContent = DB.clients.filter(x=>!x.deleted).length;
-  document.getElementById('cnt-directives').textContent = DB.directives.filter(x=>!x.deleted).length;
-  document.getElementById('cnt-planned').textContent = DB.planned.filter(x=>!x.deleted).length;
+  document.getElementById('cnt-clients').textContent = tabLoaded.clients ? DB.clients.filter(x=>!x.deleted).length : '…';
+  document.getElementById('cnt-directives').textContent = tabLoaded.directives ? DB.directives.filter(x=>!x.deleted).length : '…';
+  document.getElementById('cnt-planned').textContent = tabLoaded.planned ? DB.planned.filter(x=>!x.deleted).length : '…';
 
   const lu = document.getElementById('lastUpdateTxt');
   if(DB.lastUpdate){
@@ -2175,6 +2192,9 @@ document.getElementById('tabBar').addEventListener('click', e=>{
   selectedSearchIds.clear();
   document.getElementById('searchBox').value = '';
   renderAll();
+  if(!tabLoaded[activeTab] && isConfigured()){
+    loadTab_(activeTab).then(()=>renderAll());
+  }
 });
 document.getElementById('searchBox').addEventListener('input', ()=>{ renderSearchDropdown(); renderTableBody(); });
 document.getElementById('searchBox').addEventListener('focus', ()=>{
@@ -2324,7 +2344,7 @@ async function attemptLogin(){
   btn.disabled = true;
   btn.textContent = 'ກຳລັງກວດສອບ...';
   const controller = new AbortController();
-  const timeoutId = setTimeout(()=>controller.abort(), 20000); // never hang forever — fail with a clear error after 20s
+  const timeoutId = setTimeout(()=>controller.abort(), 45000); // never hang forever — fail with a clear error after 45s (Apps Script cold-starts can genuinely take a while)
   try{
     const url = APPS_SCRIPT_URL + '?action=login&username=' + encodeURIComponent(u) + '&password=' + encodeURIComponent(p);
     const res = await fetch(url, {credentials: 'omit', cache: 'no-store', signal: controller.signal});
