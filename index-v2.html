@@ -288,12 +288,21 @@
     display:flex;align-items:center;justify-content:center;font-family:inherit;
   }
   .rte-btn:hover{border-color:var(--blue-accent);color:var(--text-hi);}
-  .rte-color{
-    width:30px;height:28px;padding:2px;border-radius:6px;border:1px solid var(--line);
-    background:var(--navy-800);cursor:pointer;
+  .rte-color-wrap{position:relative;}
+  .rte-color-btn{font-size:13px;}
+  .rte-color-menu{
+    display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:80;
+    background:var(--navy-800);border:1px solid var(--line);border-radius:9px;
+    box-shadow:var(--shadow);padding:8px;
+    grid-template-columns:repeat(6,24px);gap:6px;
   }
-  .rte-color::-webkit-color-swatch-wrapper{padding:2px;}
-  .rte-color::-webkit-color-swatch{border:none;border-radius:4px;}
+  .rte-color-menu.show{display:grid;}
+  .rte-swatch{
+    width:24px;height:24px;border-radius:6px;border:1px solid var(--line);cursor:pointer;
+    padding:0;font-size:11px;font-weight:700;color:var(--text-hi);
+  }
+  .rte-swatch:hover{outline:2px solid var(--blue-accent);outline-offset:1px;}
+  .rte-swatch-default{background:var(--navy-900);}
   .rte-editor{
     background:var(--navy-900);border:1px solid var(--line);color:var(--text-hi);
     padding:10px 12px;border-radius:0 0 9px 9px;font-size:13.5px;line-height:1.6;
@@ -1185,13 +1194,27 @@ function makeRichEditor(containerEl, initialHTML, placeholder){
       <button type="button" class="rte-btn" data-cmd="strikeThrough" title="ຂີດຂ້າ"><s>S</s></button>
       <button type="button" class="rte-btn" data-cmd="insertUnorderedList" title="Bullet list">≡</button>
       <button type="button" class="rte-btn" data-cmd="insertOrderedList" title="ລຳດັບເລກ 1. 2. 3.">1.</button>
-      <input type="color" class="rte-color" title="ສີໂຕໜັງສື" value="#f4f7fb">
-      <button type="button" class="rte-btn rte-color-reset" title="ລ້າງສີ (ກັບເປັນສີເລີ່ມຕົ້ນ)">✕</button>
+      <div class="rte-color-wrap">
+        <button type="button" class="rte-btn rte-color-btn" title="ສີໂຕໜັງສື">🎨</button>
+        <div class="rte-color-menu">
+          <button type="button" class="rte-swatch rte-swatch-default" data-color="inherit" title="ຄ່າເລີ່ມຕົ້ນ">A</button>
+          <button type="button" class="rte-swatch" style="background:#ffffff" data-color="#ffffff" title="ຂາວ"></button>
+          <button type="button" class="rte-swatch" style="background:#f16565" data-color="#f16565" title="ແດງ"></button>
+          <button type="button" class="rte-swatch" style="background:#f0b429" data-color="#f0b429" title="ສົ້ມ"></button>
+          <button type="button" class="rte-swatch" style="background:#e8cd94" data-color="#e8cd94" title="ຄຳ"></button>
+          <button type="button" class="rte-swatch" style="background:#3ecf8e" data-color="#3ecf8e" title="ຂຽວ"></button>
+          <button type="button" class="rte-swatch" style="background:#4f8ef7" data-color="#4f8ef7" title="ຟ້າ"></button>
+          <button type="button" class="rte-swatch" style="background:#a78bfa" data-color="#a78bfa" title="ມ່ວງ"></button>
+          <button type="button" class="rte-swatch" style="background:#f472b6" data-color="#f472b6" title="ບົວ"></button>
+          <button type="button" class="rte-swatch" style="background:#7d8db0" data-color="#7d8db0" title="ເທົາ"></button>
+          <button type="button" class="rte-swatch" style="background:#111111;border:1px solid #444" data-color="#111111" title="ດຳ"></button>
+        </div>
+      </div>
     </div>
     <div class="rte-editor" contenteditable="true" data-placeholder="${escapeHtml(placeholder||'ພິມຂໍ້ຄວາມ...')}">${initialHTML || ''}</div>
   `;
   const editor = containerEl.querySelector('.rte-editor');
-  containerEl.querySelectorAll('.rte-btn').forEach(btn=>{
+  containerEl.querySelectorAll('.rte-btn, .rte-swatch').forEach(btn=>{
     btn.addEventListener('mousedown', (e)=>{ e.preventDefault(); }); // keep text selection when clicking toolbar
   });
   containerEl.querySelectorAll('.rte-btn[data-cmd]').forEach(btn=>{
@@ -1200,33 +1223,22 @@ function makeRichEditor(containerEl, initialHTML, placeholder){
       editor.focus();
     });
   });
-  // Color picker needs the text selection preserved across the native color
-  // dialog, which otherwise steals focus from the editor before we can apply it.
-  let savedRange = null;
-  const colorInput = containerEl.querySelector('.rte-color');
-  colorInput.addEventListener('mousedown', ()=>{
-    const sel = window.getSelection();
-    if(sel.rangeCount>0 && editor.contains(sel.anchorNode)) savedRange = sel.getRangeAt(0).cloneRange();
+  const colorBtn = containerEl.querySelector('.rte-color-btn');
+  const colorMenu = containerEl.querySelector('.rte-color-menu');
+  colorBtn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    document.querySelectorAll('.rte-color-menu.show').forEach(m=>{ if(m!==colorMenu) m.classList.remove('show'); });
+    colorMenu.classList.toggle('show');
   });
-  colorInput.addEventListener('input', ()=>{
-    if(savedRange){
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(savedRange);
-    }
-    editor.focus();
-    document.execCommand('styleWithCSS', false, true);
-    document.execCommand('foreColor', false, colorInput.value);
-  });
-  const resetBtn = containerEl.querySelector('.rte-color-reset');
-  resetBtn.addEventListener('click', ()=>{
-    if(savedRange){
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(savedRange);
-    }
-    editor.focus();
-    document.execCommand('foreColor', false, 'inherit');
+  colorMenu.addEventListener('click', e=>e.stopPropagation());
+  document.addEventListener('click', ()=>{ colorMenu.classList.remove('show'); });
+  containerEl.querySelectorAll('.rte-swatch').forEach(sw=>{
+    sw.addEventListener('click', ()=>{
+      document.execCommand('styleWithCSS', false, true);
+      document.execCommand('foreColor', false, sw.dataset.color);
+      editor.focus();
+      colorMenu.classList.remove('show');
+    });
   });
   return {
     getHTML: () => editor.innerHTML,
