@@ -288,6 +288,12 @@
     display:flex;align-items:center;justify-content:center;font-family:inherit;
   }
   .rte-btn:hover{border-color:var(--blue-accent);color:var(--text-hi);}
+  .rte-color{
+    width:30px;height:28px;padding:2px;border-radius:6px;border:1px solid var(--line);
+    background:var(--navy-800);cursor:pointer;
+  }
+  .rte-color::-webkit-color-swatch-wrapper{padding:2px;}
+  .rte-color::-webkit-color-swatch{border:none;border-radius:4px;}
   .rte-editor{
     background:var(--navy-900);border:1px solid var(--line);color:var(--text-hi);
     padding:10px 12px;border-radius:0 0 9px 9px;font-size:13.5px;line-height:1.6;
@@ -1179,16 +1185,48 @@ function makeRichEditor(containerEl, initialHTML, placeholder){
       <button type="button" class="rte-btn" data-cmd="strikeThrough" title="ຂີດຂ້າ"><s>S</s></button>
       <button type="button" class="rte-btn" data-cmd="insertUnorderedList" title="Bullet list">≡</button>
       <button type="button" class="rte-btn" data-cmd="insertOrderedList" title="ລຳດັບເລກ 1. 2. 3.">1.</button>
+      <input type="color" class="rte-color" title="ສີໂຕໜັງສື" value="#f4f7fb">
+      <button type="button" class="rte-btn rte-color-reset" title="ລ້າງສີ (ກັບເປັນສີເລີ່ມຕົ້ນ)">✕</button>
     </div>
     <div class="rte-editor" contenteditable="true" data-placeholder="${escapeHtml(placeholder||'ພິມຂໍ້ຄວາມ...')}">${initialHTML || ''}</div>
   `;
   const editor = containerEl.querySelector('.rte-editor');
   containerEl.querySelectorAll('.rte-btn').forEach(btn=>{
     btn.addEventListener('mousedown', (e)=>{ e.preventDefault(); }); // keep text selection when clicking toolbar
+  });
+  containerEl.querySelectorAll('.rte-btn[data-cmd]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       document.execCommand(btn.dataset.cmd, false, null);
       editor.focus();
     });
+  });
+  // Color picker needs the text selection preserved across the native color
+  // dialog, which otherwise steals focus from the editor before we can apply it.
+  let savedRange = null;
+  const colorInput = containerEl.querySelector('.rte-color');
+  colorInput.addEventListener('mousedown', ()=>{
+    const sel = window.getSelection();
+    if(sel.rangeCount>0 && editor.contains(sel.anchorNode)) savedRange = sel.getRangeAt(0).cloneRange();
+  });
+  colorInput.addEventListener('input', ()=>{
+    if(savedRange){
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+    }
+    editor.focus();
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('foreColor', false, colorInput.value);
+  });
+  const resetBtn = containerEl.querySelector('.rte-color-reset');
+  resetBtn.addEventListener('click', ()=>{
+    if(savedRange){
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+    }
+    editor.focus();
+    document.execCommand('foreColor', false, 'inherit');
   });
   return {
     getHTML: () => editor.innerHTML,
