@@ -178,10 +178,12 @@
 
   /* ---------- Filter bar ---------- */
   .filter-bar{
-    display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+    display:flex;gap:10px;flex-wrap:nowrap;align-items:center;margin-bottom:16px;
     background:var(--navy-800);border:1px solid var(--line);border-radius:var(--radius);
-    padding:14px 16px;
+    padding:14px 16px;overflow-x:auto;
   }
+  .filter-bar > *{flex-shrink:0;}
+  .filter-bar input[type=text]{flex-shrink:1;}
   .filter-bar input[type=text], .filter-bar select, .filter-bar input[type=date]{
     background:var(--navy-900);border:1px solid var(--line);color:var(--text-hi);
     padding:9px 12px;border-radius:9px;font-size:13.5px;font-family:inherit;
@@ -1477,7 +1479,7 @@ function renderLogList(){
     return;
   }
   const indexed = logDraft.map((l, idx)=>({idx, l}));
-  const sorted = indexed.sort((a,b)=> logSortKey(b.l).localeCompare(logSortKey(a.l)));
+  const sorted = indexed.sort((a,b)=> compareLogsDesc(a.l, b.l));
   el.innerHTML = sorted.map(({idx, l})=>`
     <div class="log-item">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -1511,7 +1513,7 @@ function addLogEntry(){
   const t = logRte ? logRte.getHTML().trim() : '';
   const plain = t.replace(/<[^>]+>/g,'').trim();
   if(!plain) return;
-  logDraft.push({date:d, text:t});
+  logDraft.push({date:d, text:t, _ts: Date.now()});
   if(logRte) logRte.setHTML('');
   renderLogList();
 }
@@ -1699,7 +1701,7 @@ async function saveQuickUpdate(){
   item.status = document.getElementById('quStatus').value;
   item.progress = (item.status === 'ສຳເລັດ') ? 100 : (item.status === 'ຕິດຕາມຢ່າງຕໍ່ເນື່ອງ') ? 50 : (parseInt(document.getElementById('quProgress').value) || 0);
   if(!Array.isArray(item.logs)) item.logs = [];
-  item.logs.push({date: document.getElementById('quDate').value, text: text});
+  item.logs.push({date: document.getElementById('quDate').value, text: text, _ts: Date.now()});
   stampEditor(item);
   await saveItem(quickTab, item);
   closeQuickUpdate();
@@ -1736,7 +1738,7 @@ function renderTimeline(item){
     el.innerHTML = `<div class="timeline-empty">🕘 ຍັງບໍ່ມີ Log ຄວາມຄືບໜ້າສຳລັບວຽກນີ້</div>`;
     return;
   }
-  const sorted = [...logs].sort((a,b)=> logSortKey(b).localeCompare(logSortKey(a)));
+  const sorted = [...logs].sort(compareLogsDesc);
   el.innerHTML = sorted.map((l,idx)=>{
     const dateTxt = (l.date && l.date!=='0000-00-00') ? formatDateLao(l.date) : '(ບໍ່ມີວັນທີ່ລະອຽດ)';
     return `<div class="timeline-item">
@@ -2079,10 +2081,18 @@ function parseWeekLabelToISO(label){
   return '';
 }
 function logSortKey(l){ return (l && l.date) ? l.date : '0000-00-00'; }
+// Logs only store a day-level date, so two entries added the same day tie on
+// that alone — _ts (set once, at creation, never shown/edited) breaks the tie
+// so the one actually typed more recently still sorts above the other.
+function compareLogsDesc(a, b){
+  const dateCmp = logSortKey(b).localeCompare(logSortKey(a));
+  if(dateCmp !== 0) return dateCmp;
+  return (b._ts||0) - (a._ts||0);
+}
 function getLatestLog(item){
   const logs = Array.isArray(item.logs) ? item.logs : [];
   if(logs.length===0) return null;
-  const sorted = [...logs].sort((a,b)=> logSortKey(b).localeCompare(logSortKey(a)));
+  const sorted = [...logs].sort(compareLogsDesc);
   return sorted[0];
 }
 const VIRTUAL_LABELS = {
