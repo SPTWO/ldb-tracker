@@ -1965,6 +1965,10 @@ function exportReportExcel(){
 function exportBackup(){
   try{
     const wb = XLSX.utils.book_new();
+    // Unlike Report Excel (meant for human reading), this backup file exists
+    // purely for restore fidelity — content/note/log text keep their raw
+    // HTML (bold/italic/bullets/color) so re-importing this file later
+    // restores formatting exactly instead of collapsing it to plain "- " lines.
     const richFields = ['content','note'];
     const buildSheet = (tab)=>{
       const rows = DB[tab].filter(item=>!item.deleted).map(item=>{
@@ -1972,12 +1976,12 @@ function exportBackup(){
         TAB_DEFS[tab].columns.forEach(col=>{
           const raw = item[col.key] || '';
           if(col.type==='date') flat[col.label] = raw ? formatDateLao(raw) : '';
-          else flat[col.label] = richFields.includes(col.key) ? stripHtmlForExport(raw) : raw;
+          else flat[col.label] = raw; // keep raw HTML for rich fields — no stripping
         });
         const l = getLatestLog(item);
-        flat['ຄວາມຄືບໜ້າປະຈຸບັນ'] = l ? stripHtmlForExport(l.text) : '';
+        flat['ຄວາມຄືບໜ້າປະຈຸບັນ'] = l ? stripHtmlForExport(l.text) : ''; // quick human-readable preview only
         flat['ວັນທີ່ອັບເດດລ່າສຸດ'] = (l && l.date && l.date!=='0000-00-00') ? formatDateLao(l.date) : '';
-        flat['Log ທັງໝົດ'] = (item.logs||[]).map(x=>`${x.date ? formatDateLao(x.date) : '?'}: ${stripHtmlForExport(x.text)}`).join(' | ');
+        flat['Log ທັງໝົດ'] = (item.logs||[]).map(x=>`${x.date ? formatDateLao(x.date) : '?'}: ${x.text}`).join(' | '); // raw HTML preserved for restore
         return flat;
       });
       return XLSX.utils.json_to_sheet(rows);
@@ -2115,11 +2119,14 @@ function detectSheetFormat(sheet){
 }
 function parseLogsFromBackupString(s){
   if(!s) return [];
+  // Our own 📤 backup keeps raw HTML here (for round-trip fidelity of
+  // bold/italic/bullets); not escaping is safe even for older plain-text
+  // exports since they contain no real tags to begin with.
   return s.split(' | ').filter(x=>x.trim()!=='').map(piece=>{
     const idx = piece.indexOf(': ');
-    if(idx===-1) return {date:'', text: escapeHtml(piece)};
+    if(idx===-1) return {date:'', text: piece};
     const date = piece.slice(0, idx).trim();
-    return {date: date==='?' ? '' : ddmmyyyyToIso(date), text: escapeHtml(piece.slice(idx+2))};
+    return {date: date==='?' ? '' : ddmmyyyyToIso(date), text: piece.slice(idx+2)};
   });
 }
 function parseBackupSheetToItems(sheet, targetTab){
@@ -2147,7 +2154,7 @@ function parseBackupSheetToItems(sheet, targetTab){
       const key = labelToKey[h];
       if(!key || val==='') return;
       if(labelToType[h]==='date') rec[key] = ddmmyyyyToIso(val);
-      else rec[key] = richKeys.includes(key) ? escapeHtml(val) : val;
+      else rec[key] = val; // our own backup keeps raw HTML for content/note — no escaping needed
     });
     if(!rec.title && !rec.content) continue;
     rec.id = uid();
