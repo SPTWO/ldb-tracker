@@ -811,7 +811,11 @@ async function sbFetch_(path, options={}, attempts=2){
 }
 
 async function loadTab_(tab){
-  const r = await sbFetch_(`/rest/v1/${tab}?select=data`, {method:'GET'});
+  // order=id.asc keeps rows in the order they were created — our ids embed a
+  // creation timestamp (id_<ms>_<rand>), so this also matches insertion order.
+  // Without an explicit order, Postgres/PostgREST may return rows in whatever
+  // order is physically convenient, not necessarily creation order.
+  const r = await sbFetch_(`/rest/v1/${tab}?select=data&order=id.asc`, {method:'GET'});
   if(!r.ok){
     showSaveError(`ໂຫລດ [${TAB_DEFS[tab].label}] ບໍ່ສຳເລັດ: ` + r.error);
     return false;
