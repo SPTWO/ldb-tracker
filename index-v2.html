@@ -1248,11 +1248,52 @@ function makeRichEditor(containerEl, initialHTML, placeholder){
       colorMenu.classList.remove('show');
     });
   });
+  editor.addEventListener('paste', (e)=>{
+    e.preventDefault();
+    const cd = e.clipboardData || window.clipboardData;
+    if(!cd){ return; }
+    const html = cd.getData('text/html');
+    if(html && html.trim()){
+      const clean = sanitizePastedHtml_(html);
+      document.execCommand('insertHTML', false, clean);
+    } else {
+      const text = cd.getData('text/plain') || '';
+      document.execCommand('insertText', false, text);
+    }
+  });
   return {
     getHTML: () => editor.innerHTML,
     setHTML: (html) => { editor.innerHTML = html || ''; },
     focus: () => editor.focus()
   };
+}
+// ຕັດ Font/ຂະໜາດໂຕໜັງສືທີ່ຕິດມາຈາກແຫຼ່ງ Paste ອອກ (Word/PDF/ເວັບ)
+// ແຕ່ຄົງໄວ້ ໂຕເຂັ້ມ/ໂຕອຽງ/ຂີດຂ້າ/Bullet/ລຳດັບເລກ/ສີ ໄວ້ຄືເກົ່າ ໃຫ້ Font ເປັນແບບໃນລະບົບສະເໝີ
+function sanitizePastedHtml_(html){
+  if(!html) return '';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const clean = (node)=>{
+    if(node.nodeType !== 1){ return; }
+    if(node.tagName === 'FONT'){
+      const span = document.createElement('span');
+      const color = node.getAttribute('color');
+      if(color) span.style.color = color;
+      while(node.firstChild) span.appendChild(node.firstChild);
+      if(node.parentNode) node.parentNode.replaceChild(span, node);
+      node = span;
+    }
+    if(node.style){
+      node.style.removeProperty('font-family');
+      node.style.removeProperty('font-size');
+      node.style.removeProperty('line-height');
+    }
+    node.removeAttribute('face');
+    node.removeAttribute('size');
+    Array.from(node.childNodes).forEach(clean);
+  };
+  Array.from(tmp.childNodes).forEach(clean);
+  return tmp.innerHTML;
 }
 function stripHtmlForExport(html){
   if(!html) return '';
