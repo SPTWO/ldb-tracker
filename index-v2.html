@@ -154,7 +154,7 @@
     margin-bottom:10px;text-transform:none;
   }
   .dash-grid{
-    display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:22px;
+    display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:22px;
   }
   .stat-card{
     background:linear-gradient(160deg,var(--navy-800),var(--navy-900));
@@ -172,6 +172,7 @@
   .stat-card.accent-green .value{color:var(--green);}
   .stat-card.accent-amber .value{color:var(--amber);}
   .stat-card.accent-red .value{color:var(--red);}
+  .stat-card.accent-blue .value{color:var(--blue-accent);}
 
   /* ---------- Tabs ---------- */
   .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;}
@@ -416,7 +417,7 @@
   .toast.show{opacity:1;}
 
   @media (max-width:900px){
-    .dash-grid{grid-template-columns:repeat(2,1fr);}
+    .dash-grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}
     .form-grid{grid-template-columns:1fr;}
     .wrap{padding:18px;}
     .topbar{padding:16px 18px;flex-wrap:wrap;gap:10px;}
@@ -709,11 +710,10 @@ const KNOWN_DEPTS = [
   "ຂະແໜງເງິນກູ້ Corp","ຂະແໜງເງິນກູ້ SME","ຂະແໜງເກັບກູ້ໜີ້ສິນ",
   "ຂະແໜງຄຸ້ມຄອງສິນເຊື່ອ","ຂະແໜງສັງລວມບັນຊີ","ຄະນະຝ່າຍ","ຄະນະຜູ້ຊ່ວຍ ແລະ ເລຂາ"
 ];
-const PRIORITY_LIST = ["ປົກກະຕິ","ບູລິມະສິດ","ດ່ວນ","ດ່ວນທີ່ສຸດ"];
+const PRIORITY_LIST = ["ປົກກະຕິ","ບູລິມະສິດ","ດ່ວນທີ່ສຸດ"];
 const PRIORITY_BADGE = {
   "ປົກກະຕິ":"badge-priority-normal",
   "ບູລິມະສິດ":"badge-priority-medium",
-  "ດ່ວນ":"badge-priority-urgent",
   "ດ່ວນທີ່ສຸດ":"badge-priority-critical"
 };
 
@@ -1074,39 +1074,49 @@ function daysUntilDueLabel(item){
   if(d===0) return 'ຮອດກຳນົດມື້ນີ້';
   return `ຍັງ ${d} ວັນ`;
 }
+function computeStatsFromItems(items){
+  const total = items.length;
+  const progressing = items.filter(x=>x.status==="ກໍາລັງດໍາເນີນການ").length;
+  const tracking = items.filter(x=>x.status==="ຕິດຕາມຢ່າງຕໍ່ເນື່ອງ").length;
+  const done = items.filter(x=>x.status==="ສຳເລັດ").length;
+  const overdue = items.filter(x=>isOverdue(x)).length;
+  return {total, progressing, tracking, done, overdue};
+}
 function computeStats(tab){
   const all = (DB[tab] || []).filter(x=>!x.deleted);
-  const total = all.length;
-  const done = all.filter(x=>x.status==="ສຳເລັດ").length;
-  const ongoing = all.filter(x=>x.status==="ກໍາລັງດໍາເນີນການ" || x.status==="ຕິດຕາມຢ່າງຕໍ່ເນື່ອງ").length;
-  const overdue = all.filter(x=>isOverdue(x)).length;
-  return {total, done, ongoing, overdue};
+  return computeStatsFromItems(all);
 }
 function renderDashboard(){
   const s = computeStats(activeTab);
   const tabLabel = TAB_DEFS[activeTab].label;
   document.getElementById('dashHeading').textContent = 'ພາບລວມ — ' + tabLabel;
   const grid = document.getElementById('dashGrid');
+  const pct_ = (n)=> s.total ? Math.round(n/s.total*100) : 0;
   grid.innerHTML = `
     <div class="stat-card">
       <div class="label">${escapeHtml(tabLabel)} — ວຽກທັງໝົດ</div>
       <div class="value">${s.total}</div>
-      <div class="foot">ສະຫຼຸບສະເພາະໝວດນີ້</div>
+      <div class="foot">100% ຂອງໝວດນີ້</div>
     </div>
     <div class="stat-card accent-amber">
       <div class="label">ກຳລັງດຳເນີນການ</div>
-      <div class="value">${s.ongoing}</div>
-      <div class="foot">ຕິດຕາມ / ດຳເນີນການຢູ່</div>
+      <div class="value">${s.progressing}</div>
+      <div class="foot">${pct_(s.progressing)}% ຂອງໝວດນີ້</div>
+    </div>
+    <div class="stat-card accent-blue">
+      <div class="label">ຕິດຕາມຢ່າງຕໍ່ເນື່ອງ</div>
+      <div class="value">${s.tracking}</div>
+      <div class="foot">${pct_(s.tracking)}% ຂອງໝວດນີ້</div>
     </div>
     <div class="stat-card accent-green">
       <div class="label">ສຳເລັດແລ້ວ</div>
       <div class="value">${s.done}</div>
-      <div class="foot">${s.total? Math.round(s.done/s.total*100):0}% ຂອງໝວດນີ້</div>
+      <div class="foot">${pct_(s.done)}% ຂອງໝວດນີ້</div>
     </div>
     <div class="stat-card accent-red">
       <div class="label">ເກີນກຳນົດ</div>
       <div class="value">${s.overdue}</div>
-      <div class="foot">ຕ້ອງຮີບຕິດຕາມດ່ວນ</div>
+      <div class="foot">${pct_(s.overdue)}% ຂອງໝວດນີ້</div>
     </div>
   `;
   document.getElementById('cnt-clients').textContent = tabLoaded.clients ? DB.clients.filter(x=>!x.deleted).length : '…';
@@ -1968,6 +1978,11 @@ function buildPrintTable(items, cols, startIndex){
   }).join('');
   return `<table class="print-table">${buildColgroup(cols)}<thead>${thead}</thead><tbody>${rows}</tbody></table>`;
 }
+function buildReportStatsLine(items){
+  const s = computeStatsFromItems(items);
+  const pct = (n)=> s.total ? Math.round(n/s.total*100) : 0;
+  return `ວຽກທັງໝົດ: ${s.total} &nbsp;·&nbsp; ກຳລັງດຳເນີນການ: ${s.progressing} (${pct(s.progressing)}%) &nbsp;·&nbsp; ຕິດຕາມຢ່າງຕໍ່ເນື່ອງ: ${s.tracking} (${pct(s.tracking)}%) &nbsp;·&nbsp; ສຳເລັດແລ້ວ: ${s.done} (${pct(s.done)}%) &nbsp;·&nbsp; ເກີນກຳນົດ: ${s.overdue} (${pct(s.overdue)}%)`;
+}
 function buildPrintHeaderHtml(items, pageNum, totalPages){
   const logoSrc = document.getElementById('brandLogo') ? document.getElementById('brandLogo').src : '';
   const pageNote = totalPages>1 ? ` &nbsp;·&nbsp; ໜ້າ ${pageNum}/${totalPages}` : '';
@@ -1978,6 +1993,7 @@ function buildPrintHeaderHtml(items, pageNum, totalPages){
         <div class="print-title">ລະບົບຕິດຕາມວຽກ ຝ່າຍສິນເຊື່ອ — ${escapeHtml(TAB_DEFS[activeTab].label)}</div>
         <div class="print-meta">ວັນທີ່ພິມ: ${formatPrintDate(new Date())} &nbsp;·&nbsp; ຈຳນວນລາຍການ: ${items.length}${pageNote}</div>
         <div class="print-meta">ຕົວກອງທີ່ໃຊ້: ${buildFilterSummary()}</div>
+        <div class="print-meta">${buildReportStatsLine(items)}</div>
       </div>
     </div>`;
 }
@@ -2070,6 +2086,7 @@ function exportReportExcel(){
     aoa.push([`ລະບົບຕິດຕາມວຽກ ຝ່າຍສິນເຊື່ອ — ${TAB_DEFS[activeTab].label}`]);
     aoa.push([`ວັນທີ່ພິມ: ${formatPrintDate(new Date())}`, '', `ຈຳນວນລາຍການ: ${items.length}`]);
     aoa.push([`ຕົວກອງທີ່ໃຊ້: ${buildFilterSummary()}`]);
+    aoa.push([buildReportStatsLine(items).replace(/&nbsp;/g, ' ')]);
     aoa.push([]);
     aoa.push(['ລ/ດ', ...cols.map(k=>colLabel(activeTab,k))]);
     items.forEach((item, idx)=>{
