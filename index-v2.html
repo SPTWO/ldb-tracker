@@ -511,6 +511,10 @@
       <button type="button" class="multiselect-btn" id="deptMultiBtn">ທຸກຂະແໜງ ▾</button>
       <div class="multiselect-menu" id="deptMultiMenu"></div>
     </div>
+    <div class="multiselect" id="priorityMultiselect">
+      <button type="button" class="multiselect-btn" id="priorityMultiBtn">ທຸກລະດັບ ▾</button>
+      <div class="multiselect-menu" id="priorityMultiMenu"></div>
+    </div>
     <label class="date-range-label">ອັບເດດລ່າສຸດ
       <input type="date" id="filterDateFrom">
       <span>ຫາ</span>
@@ -1128,6 +1132,7 @@ function getDeptOptions(){
 }
 let selectedStatuses = new Set();
 let selectedDepts = new Set();
+let selectedPriorities = new Set();
 let sortKey = null;
 let selectedSearchIds = new Set();
 let pinnedOnlyFilter = false;
@@ -1211,6 +1216,7 @@ function fillDeptFilter(){
   const opts = getDeptOptions();
   renderMultiselect('deptMultiMenu', 'deptMultiBtn', opts, selectedDepts, 'ທຸກຂະແໜງ');
   renderMultiselect('statusMultiMenu', 'statusMultiBtn', STATUS_LIST, selectedStatuses, 'ທຸກສະຖານະ');
+  renderMultiselect('priorityMultiMenu', 'priorityMultiBtn', PRIORITY_LIST, selectedPriorities, 'ທຸກລະດັບ');
 }
 function renderMultiselect(menuId, btnId, options, selectedSet, allLabel){
   const menu = document.getElementById(menuId);
@@ -1223,12 +1229,18 @@ function renderMultiselect(menuId, btnId, options, selectedSet, allLabel){
     </label>`).join('');
   btn.textContent = (selectedSet.size===0 ? allLabel : `${allLabel.replace('ທຸກ','')} (${selectedSet.size})`) + ' ▾';
 }
+const MULTISELECT_TARGETS = {
+  deptMultiMenu: {set:()=>selectedDepts, allLabel:'ທຸກຂະແໜງ'},
+  statusMultiMenu: {set:()=>selectedStatuses, allLabel:'ທຸກສະຖານະ'},
+  priorityMultiMenu: {set:()=>selectedPriorities, allLabel:'ທຸກລະດັບ'}
+};
 function toggleMultiselectValue(menuId, btnId, checkboxEl){
-  const targetSet = (menuId==='deptMultiMenu') ? selectedDepts : selectedStatuses;
+  const cfg = MULTISELECT_TARGETS[menuId];
+  if(!cfg) return;
+  const targetSet = cfg.set();
   if(checkboxEl.checked) targetSet.add(checkboxEl.value);
   else targetSet.delete(checkboxEl.value);
-  const allLabel = (menuId==='deptMultiMenu') ? 'ທຸກຂະແໜງ' : 'ທຸກສະຖານະ';
-  document.getElementById(btnId).textContent = (targetSet.size===0 ? allLabel : `${allLabel.replace('ທຸກ','')} (${targetSet.size})`) + ' ▾';
+  document.getElementById(btnId).textContent = (targetSet.size===0 ? cfg.allLabel : `${cfg.allLabel.replace('ທຸກ','')} (${targetSet.size})`) + ' ▾';
   renderTableBody();
 }
 function escapeHtml(s){
@@ -1361,6 +1373,7 @@ function getFiltered(){
     if(pinnedOnlyFilter && !item.pinned) return false;
     if(selectedStatuses.size>0 && !selectedStatuses.has(item.status)) return false;
     if(selectedDepts.size>0 && !selectedDepts.has(item.department)) return false;
+    if(selectedPriorities.size>0 && !selectedPriorities.has(item.workCategory)) return false;
     if(dateFrom || dateTo){
       const l = getLatestLog(item);
       const d = l && l.date && l.date!=='0000-00-00' ? l.date : null;
@@ -1908,6 +1921,7 @@ function buildFilterSummary(){
   if(q) parts.push(`ຄົ້ນຫາ: "${escapeHtml(q)}"`);
   if(selectedStatuses.size>0) parts.push(`ສະຖານະ: ${Array.from(selectedStatuses).map(escapeHtml).join(', ')}`);
   if(selectedDepts.size>0) parts.push(`ຂະແໜງ: ${Array.from(selectedDepts).map(escapeHtml).join(', ')}`);
+  if(selectedPriorities.size>0) parts.push(`ລັກສະນະໜ້າວຽກ: ${Array.from(selectedPriorities).map(escapeHtml).join(', ')}`);
   if(df || dt) parts.push(`ອັບເດດລ່າສຸດ: ${df||'…'} ຫາ ${dt||'…'}`);
   return parts.length ? parts.join(' · ') : 'ບໍ່ມີການກອງ (ສະແດງທັງໝົດ)';
 }
@@ -2432,6 +2446,7 @@ document.getElementById('btnClearFilter').addEventListener('click', ()=>{
   renderSearchDropdown();
   selectedStatuses.clear();
   selectedDepts.clear();
+  selectedPriorities.clear();
   fillDeptFilter();
   document.getElementById('filterDateFrom').value='';
   document.getElementById('filterDateTo').value='';
@@ -2467,6 +2482,7 @@ document.addEventListener('click', ()=>{
   document.getElementById('reportMenu').classList.remove('show');
   document.getElementById('statusMultiMenu').classList.remove('show');
   document.getElementById('deptMultiMenu').classList.remove('show');
+  document.getElementById('priorityMultiMenu').classList.remove('show');
   document.getElementById('searchMultiMenu').classList.remove('show');
   document.getElementById('linkMenu').classList.remove('show');
 });
@@ -2530,17 +2546,27 @@ async function removeLinkFromItem(idx){
 document.getElementById('statusMultiBtn').addEventListener('click', (e)=>{
   e.stopPropagation();
   document.getElementById('deptMultiMenu').classList.remove('show');
+  document.getElementById('priorityMultiMenu').classList.remove('show');
   positionMenuBelow_(document.getElementById('statusMultiBtn'), document.getElementById('statusMultiMenu'));
   document.getElementById('statusMultiMenu').classList.toggle('show');
 });
 document.getElementById('deptMultiBtn').addEventListener('click', (e)=>{
   e.stopPropagation();
   document.getElementById('statusMultiMenu').classList.remove('show');
+  document.getElementById('priorityMultiMenu').classList.remove('show');
   positionMenuBelow_(document.getElementById('deptMultiBtn'), document.getElementById('deptMultiMenu'));
   document.getElementById('deptMultiMenu').classList.toggle('show');
 });
+document.getElementById('priorityMultiBtn').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  document.getElementById('statusMultiMenu').classList.remove('show');
+  document.getElementById('deptMultiMenu').classList.remove('show');
+  positionMenuBelow_(document.getElementById('priorityMultiBtn'), document.getElementById('priorityMultiMenu'));
+  document.getElementById('priorityMultiMenu').classList.toggle('show');
+});
 document.getElementById('statusMultiMenu').addEventListener('click', e=>e.stopPropagation());
 document.getElementById('deptMultiMenu').addEventListener('click', e=>e.stopPropagation());
+document.getElementById('priorityMultiMenu').addEventListener('click', e=>e.stopPropagation());
 document.getElementById('btnImport').addEventListener('click', openImport);
 document.getElementById('importCloseBtn').addEventListener('click', closeImport);
 document.getElementById('btnCancelImport').addEventListener('click', closeImport);
